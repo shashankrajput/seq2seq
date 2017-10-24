@@ -28,175 +28,325 @@ from seq2seq.training import utils as training_utils
 
 
 def _unpack_cell(cell):
-  """Unpack the cells because the stack_bidirectional_dynamic_rnn
-  expects a list of cells, one per layer."""
-  if isinstance(cell, tf.contrib.rnn.MultiRNNCell):
-    return cell._cells  #pylint: disable=W0212
-  else:
-    return [cell]
+    """Unpack the cells because the stack_bidirectional_dynamic_rnn
+    expects a list of cells, one per layer."""
+    if isinstance(cell, tf.contrib.rnn.MultiRNNCell):
+        return cell._cells  # pylint: disable=W0212
+    else:
+        return [cell]
 
 
 def _default_rnn_cell_params():
-  """Creates default parameters used by multiple RNN encoders.
-  """
-  return {
-      "cell_class": "BasicLSTMCell",
-      "cell_params": {
-          "num_units": 128
-      },
-      "dropout_input_keep_prob": 1.0,
-      "dropout_output_keep_prob": 1.0,
-      "num_layers": 1,
-      "residual_connections": False,
-      "residual_combiner": "add",
-      "residual_dense": False
-  }
+    """Creates default parameters used by multiple RNN encoders.
+    """
+    return {
+        "cell_class": "BasicLSTMCell",
+        "cell_params": {
+            "num_units": 128
+        },
+        "dropout_input_keep_prob": 1.0,
+        "dropout_output_keep_prob": 1.0,
+        "num_layers": 1,
+        "residual_connections": False,
+        "residual_combiner": "add",
+        "residual_dense": False
+    }
 
 
 def _toggle_dropout(cell_params, mode):
-  """Disables dropout during eval/inference mode
-  """
-  cell_params = copy.deepcopy(cell_params)
-  if mode != tf.contrib.learn.ModeKeys.TRAIN:
-    cell_params["dropout_input_keep_prob"] = 1.0
-    cell_params["dropout_output_keep_prob"] = 1.0
-  return cell_params
+    """Disables dropout during eval/inference mode
+    """
+    cell_params = copy.deepcopy(cell_params)
+    if mode != tf.contrib.learn.ModeKeys.TRAIN:
+        cell_params["dropout_input_keep_prob"] = 1.0
+        cell_params["dropout_output_keep_prob"] = 1.0
+    return cell_params
 
 
 class UnidirectionalRNNEncoder(Encoder):
-  """
-  A unidirectional RNN encoder. Stacking should be performed as
-  part of the cell.
+    """
+    A unidirectional RNN encoder. Stacking should be performed as
+    part of the cell.
 
-  Args:
-    cell: An instance of tf.contrib.rnn.RNNCell
-    name: A name for the encoder
-  """
+    Args:
+      cell: An instance of tf.contrib.rnn.RNNCell
+      name: A name for the encoder
+    """
 
-  def __init__(self, params, mode, name="forward_rnn_encoder"):
-    super(UnidirectionalRNNEncoder, self).__init__(params, mode, name)
-    self.params["rnn_cell"] = _toggle_dropout(self.params["rnn_cell"], mode)
+    def __init__(self, params, mode, name="forward_rnn_encoder"):
+        super(UnidirectionalRNNEncoder, self).__init__(params, mode, name)
+        self.params["rnn_cell"] = _toggle_dropout(self.params["rnn_cell"], mode)
 
-  @staticmethod
-  def default_params():
-    return {
-        "rnn_cell": _default_rnn_cell_params(),
-        "init_scale": 0.04,
-    }
+    @staticmethod
+    def default_params():
+        return {
+            "rnn_cell": _default_rnn_cell_params(),
+            "init_scale": 0.04,
+        }
 
-  def encode(self, inputs, sequence_length, **kwargs):
-    scope = tf.get_variable_scope()
-    scope.set_initializer(tf.random_uniform_initializer(
-        -self.params["init_scale"],
-        self.params["init_scale"]))
+    def encode(self, inputs, sequence_length, **kwargs):
+        scope = tf.get_variable_scope()
+        scope.set_initializer(tf.random_uniform_initializer(
+            -self.params["init_scale"],
+            self.params["init_scale"]))
 
-    cell = training_utils.get_rnn_cell(**self.params["rnn_cell"])
-    outputs, state = tf.nn.dynamic_rnn(
-        cell=cell,
-        inputs=inputs,
-        sequence_length=sequence_length,
-        dtype=tf.float32,
-        **kwargs)
-    return EncoderOutput(
-        outputs=outputs,
-        final_state=state,
-        attention_values=outputs,
-        attention_values_length=sequence_length)
+        cell = training_utils.get_rnn_cell(**self.params["rnn_cell"])
+        outputs, state = tf.nn.dynamic_rnn(
+            cell=cell,
+            inputs=inputs,
+            sequence_length=sequence_length,
+            dtype=tf.float32,
+            **kwargs)
+        return EncoderOutput(
+            outputs=outputs,
+            final_state=state,
+            attention_values=outputs,
+            attention_values_length=sequence_length)
 
 
 class BidirectionalRNNEncoder(Encoder):
-  """
-  A bidirectional RNN encoder. Uses the same cell for both the
-  forward and backward RNN. Stacking should be performed as part of
-  the cell.
+    """
+    A bidirectional RNN encoder. Uses the same cell for both the
+    forward and backward RNN. Stacking should be performed as part of
+    the cell.
 
-  Args:
-    cell: An instance of tf.contrib.rnn.RNNCell
-    name: A name for the encoder
-  """
+    Args:
+      cell: An instance of tf.contrib.rnn.RNNCell
+      name: A name for the encoder
+    """
 
-  def __init__(self, params, mode, name="bidi_rnn_encoder"):
-    super(BidirectionalRNNEncoder, self).__init__(params, mode, name)
-    self.params["rnn_cell"] = _toggle_dropout(self.params["rnn_cell"], mode)
+    def __init__(self, params, mode, name="bidi_rnn_encoder"):
+        super(BidirectionalRNNEncoder, self).__init__(params, mode, name)
+        self.params["rnn_cell"] = _toggle_dropout(self.params["rnn_cell"], mode)
 
-  @staticmethod
-  def default_params():
-    return {
-        "rnn_cell": _default_rnn_cell_params(),
-        "init_scale": 0.04,
-    }
+    @staticmethod
+    def default_params():
+        return {
+            "rnn_cell": _default_rnn_cell_params(),
+            "init_scale": 0.04,
+        }
 
-  def encode(self, inputs, sequence_length, **kwargs):
-    scope = tf.get_variable_scope()
-    scope.set_initializer(tf.random_uniform_initializer(
-        -self.params["init_scale"],
-        self.params["init_scale"]))
+    def encode(self, inputs, sequence_length, **kwargs):
+        scope = tf.get_variable_scope()
+        scope.set_initializer(tf.random_uniform_initializer(
+            -self.params["init_scale"],
+            self.params["init_scale"]))
 
-    cell_fw = training_utils.get_rnn_cell(**self.params["rnn_cell"])
-    cell_bw = training_utils.get_rnn_cell(**self.params["rnn_cell"])
-    outputs, states = tf.nn.bidirectional_dynamic_rnn(
-        cell_fw=cell_fw,
-        cell_bw=cell_bw,
-        inputs=inputs,
-        sequence_length=sequence_length,
-        dtype=tf.float32,
-        **kwargs)
+        cell_fw = training_utils.get_rnn_cell(**self.params["rnn_cell"])
+        cell_bw = training_utils.get_rnn_cell(**self.params["rnn_cell"])
+        outputs, states = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=cell_fw,
+            cell_bw=cell_bw,
+            inputs=inputs,
+            sequence_length=sequence_length,
+            dtype=tf.float32,
+            **kwargs)
 
-    # Concatenate outputs and states of the forward and backward RNNs
-    outputs_concat = tf.concat(outputs, 2)
+        # Concatenate outputs and states of the forward and backward RNNs
+        outputs_concat = tf.concat(outputs, 2)
 
-    return EncoderOutput(
-        outputs=outputs_concat,
-        final_state=states,
-        attention_values=outputs_concat,
-        attention_values_length=sequence_length)
+        return EncoderOutput(
+            outputs=outputs_concat,
+            final_state=states,
+            attention_values=outputs_concat,
+            attention_values_length=sequence_length)
 
 
 class StackBidirectionalRNNEncoder(Encoder):
-  """
-  A stacked bidirectional RNN encoder. Uses the same cell for both the
-  forward and backward RNN. Stacking should be performed as part of
-  the cell.
+    """
+    A stacked bidirectional RNN encoder. Uses the same cell for both the
+    forward and backward RNN. Stacking should be performed as part of
+    the cell.
 
-  Args:
-    cell: An instance of tf.contrib.rnn.RNNCell
-    name: A name for the encoder
-  """
+    Args:
+      cell: An instance of tf.contrib.rnn.RNNCell
+      name: A name for the encoder
+    """
 
-  def __init__(self, params, mode, name="stacked_bidi_rnn_encoder"):
-    super(StackBidirectionalRNNEncoder, self).__init__(params, mode, name)
-    self.params["rnn_cell"] = _toggle_dropout(self.params["rnn_cell"], mode)
+    def __init__(self, params, mode, name="stacked_bidi_rnn_encoder"):
+        super(StackBidirectionalRNNEncoder, self).__init__(params, mode, name)
+        self.params["rnn_cell"] = _toggle_dropout(self.params["rnn_cell"], mode)
 
-  @staticmethod
-  def default_params():
-    return {
-        "rnn_cell": _default_rnn_cell_params(),
-        "init_scale": 0.04,
-    }
+    @staticmethod
+    def default_params():
+        return {
+            "rnn_cell": _default_rnn_cell_params(),
+            "init_scale": 0.04,
+        }
 
-  def encode(self, inputs, sequence_length, **kwargs):
-    scope = tf.get_variable_scope()
-    scope.set_initializer(tf.random_uniform_initializer(
-        -self.params["init_scale"],
-        self.params["init_scale"]))
+    def encode(self, inputs, sequence_length, **kwargs):
+        scope = tf.get_variable_scope()
+        scope.set_initializer(tf.random_uniform_initializer(
+            -self.params["init_scale"],
+            self.params["init_scale"]))
 
-    cell_fw = training_utils.get_rnn_cell(**self.params["rnn_cell"])
-    cell_bw = training_utils.get_rnn_cell(**self.params["rnn_cell"])
+        cell_fw = training_utils.get_rnn_cell(**self.params["rnn_cell"])
+        cell_bw = training_utils.get_rnn_cell(**self.params["rnn_cell"])
 
-    cells_fw = _unpack_cell(cell_fw)
-    cells_bw = _unpack_cell(cell_bw)
+        cells_fw = _unpack_cell(cell_fw)
+        cells_bw = _unpack_cell(cell_bw)
 
-    result = rnn.stack_bidirectional_dynamic_rnn(
-        cells_fw=cells_fw,
-        cells_bw=cells_bw,
-        inputs=inputs,
-        dtype=tf.float32,
-        sequence_length=sequence_length,
-        **kwargs)
-    outputs_concat, _output_state_fw, _output_state_bw = result
-    final_state = (_output_state_fw, _output_state_bw)
-    return EncoderOutput(
-        outputs=outputs_concat,
-        final_state=final_state,
-        attention_values=outputs_concat,
-        attention_values_length=sequence_length)
+        result = rnn.stack_bidirectional_dynamic_rnn(
+            cells_fw=cells_fw,
+            cells_bw=cells_bw,
+            inputs=inputs,
+            dtype=tf.float32,
+            sequence_length=sequence_length,
+            **kwargs)
+        outputs_concat, _output_state_fw, _output_state_bw = result
+        final_state = (_output_state_fw, _output_state_bw)
+        return EncoderOutput(
+            outputs=outputs_concat,
+            final_state=final_state,
+            attention_values=outputs_concat,
+            attention_values_length=sequence_length)
+
+
+class DynamicDirectionalRNNEncoder(Encoder):
+    """
+    A bidirectional RNN encoder. Uses the same cell for both the
+    forward and backward RNN. Stacking should be performed as part of
+    the cell.
+
+    Args:
+      cell: An instance of tf.contrib.rnn.RNNCell
+      name: A name for the encoder
+    """
+
+    def __init__(self, params, mode, name="dyna_rnn_encoder"):
+        super(DynamicDirectionalRNNEncoder, self).__init__(params, mode, name)
+        self.params["rnn_cell"] = _toggle_dropout(self.params["rnn_cell"], mode)
+
+    @staticmethod
+    def default_params():
+        return {
+            "rnn_cell": _default_rnn_cell_params(),
+            "init_scale": 0.04,
+        }
+
+    def get_attention_scores(self, attention_network_input, state, network_reuse, window, network_type):
+
+        ########## Add residual connections
+
+        attention_network_input_split = tf.split(attention_network_input, num_or_size_splits=max_sequence_length,
+                                                 axis=1)
+
+        attention_scores = []
+
+        local_reuse = False
+
+        for word_index, attention_network_input_i in enumerate(attention_network_input_split):
+            fully_connected_reuse = local_reuse or network_reuse
+
+            embedding_lookup_indices = tf.multiply(tf.ones([batch_size], dtype=tf.int32, name='current_position'),
+                                                   word_index)
+
+            positional_embedding = tf.nn.embedding_lookup(positional_embeddings, embedding_lookup_indices)
+
+            attention_scores.append(
+                tf.contrib.layers.stack(tf.concat([attention_network_input_i, state, positional_embedding], 1),
+                                        tf.contrib.layers.fully_connected,
+                                        [
+                                            attention_num_units] * attention_num_layers + [
+                                            window],
+                                        activation_fn=attention_activation, scope=network_type,
+                                        reuse=fully_connected_reuse))
+
+            local_reuse = True
+
+            attention_scores_stacked = tf.stack(attention_scores, axis=1)
+            attention_values = tf.nn.softmax(attention_scores_stacked, dim=1)
+            return attention_values
+
+    def read_attention_network(self, network_type, state, network_reuse, window):
+
+        if network_type == "source_read":
+            attention_network_input = source_sentences_projected
+        elif network_type == "target_read":
+            attention_network_input = target_sentences_projected
+        # elif network_type == "context":
+        #    attention_network_input = sentence_contexts
+        else:
+            ######## Add error message
+            return
+
+        attention_values = self.get_attention_scores(attention_network_input, state, network_reuse, window,
+                                                     network_type)
+
+        attention_values_split = tf.split(attention_values, num_or_size_splits=window, axis=-1)
+
+        attention_weighted_inputs = []
+        for attention_values_i in attention_values_split:
+            attention_weighted_inputs.append(tf.reduce_sum(tf.multiply(attention_network_input, attention_values_i), 1))
+
+        return tf.stack(attention_weighted_inputs, axis=1)
+
+    def write_attention_network(self, network_type, state, network_reuse, window):
+
+        if network_type == "target_write":
+            attention_network_input = target_sentences_projected
+        # elif network_type == "context":
+        #    attention_network_input = sentence_contexts
+        else:
+            ######## Add error message
+            return
+
+        attention_values = self.get_attention_scores(attention_network_input, state, network_reuse, window,
+                                                     network_type)
+
+        attention_values_split = tf.split(attention_values, num_or_size_splits=window, axis=-1)
+
+        state_stacked = tf.stack([state] * max_sequence_length, axis=1)
+
+        attention_weighted_inputs = []
+        for attention_values_i in attention_values_split:
+            if network_type == "target_write":
+                target_sentences_projected = tf.multiply(attention_network_input,
+                                                              1 - attention_values_i) + tf.multiply(state_stacked,
+                                                                                                    attention_values_i)
+
+    def encode(self, inputs, sequence_length, **kwargs):
+        scope = tf.get_variable_scope()
+        scope.set_initializer(tf.random_uniform_initializer(
+            -self.params["init_scale"],
+            self.params["init_scale"]))
+
+        cell = training_utils.get_rnn_cell(**self.params["rnn_cell"])
+
+        state = cell.zero_state(batch_size, tf.float32)
+        outputs = []
+
+        dynamic_rnn_reuse = False
+        for step in range(steps):
+            attention_weighted_source = self.read_attention_network('source_read', state, dynamic_rnn_reuse,
+                                                                    window)
+            attention_weighted_target = self.read_attention_network('target_read', state, dynamic_rnn_reuse,
+                                                                    window)  ##### state or output???
+            # attention_weighted_context = self.create_attention_network('context', state, unified_rnn_reuse,
+            #                                                            window)
+
+            cell_input = tf.concat(
+                [attention_weighted_source, attention_weighted_target
+                 # , attention_weighted_context
+                 ], 1)
+
+            output, state = cell(cell_input, state)
+            self.write_attention_network('target_write', output, unified_rnn_reuse, window)
+            unified_rnn_reuse = True
+
+        outputs, states = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=cell_fw,
+            cell_bw=cell_bw,
+            inputs=inputs,
+            sequence_length=sequence_length,
+            dtype=tf.float32,
+            **kwargs)
+
+        # Concatenate outputs and states of the forward and backward RNNs
+        outputs_concat = tf.concat(outputs, 2)
+
+        return EncoderOutput(
+            outputs=outputs_concat,
+            final_state=states,
+            attention_values=outputs_concat,
+            attention_values_length=sequence_length)
