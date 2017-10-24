@@ -334,13 +334,6 @@ class DynamicDirectionalRNNEncoder(Encoder):
             self.write_attention_network('target_write', output, unified_rnn_reuse, window)
             unified_rnn_reuse = True
 
-        outputs, states = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw=cell_fw,
-            cell_bw=cell_bw,
-            inputs=inputs,
-            sequence_length=sequence_length,
-            dtype=tf.float32,
-            **kwargs)
 
         # Concatenate outputs and states of the forward and backward RNNs
         outputs_concat = tf.concat(outputs, 2)
