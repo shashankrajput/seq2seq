@@ -25,6 +25,7 @@ from tensorflow.contrib.rnn.python.ops import rnn
 
 from seq2seq.encoders.encoder import Encoder, EncoderOutput
 from seq2seq.training import utils as training_utils
+from seq2seq.contrib.rnn_cell import AttentionRNNCell
 
 
 def _unpack_cell(cell):
@@ -224,94 +225,13 @@ class DynamicDirectionalRNNEncoder(Encoder):
             "init_scale": 0.04,
         }
 
-    def get_attention_scores(self, attention_network_input, state, network_reuse, window, network_type):
-
-        ########## Add residual connections
-
-        attention_network_input_split = tf.split(attention_network_input, num_or_size_splits=max_sequence_length,
-                                                 axis=1)
-
-        attention_scores = []
-
-        local_reuse = False
-
-        for word_index, attention_network_input_i in enumerate(attention_network_input_split):
-            fully_connected_reuse = local_reuse or network_reuse
-
-            embedding_lookup_indices = tf.multiply(tf.ones([batch_size], dtype=tf.int32, name='current_position'),
-                                                   word_index)
-
-            positional_embedding = tf.nn.embedding_lookup(positional_embeddings, embedding_lookup_indices)
-
-            attention_scores.append(
-                tf.contrib.layers.stack(tf.concat([attention_network_input_i, state, positional_embedding], 1),
-                                        tf.contrib.layers.fully_connected,
-                                        [
-                                            attention_num_units] * attention_num_layers + [
-                                            window],
-                                        activation_fn=attention_activation, scope=network_type,
-                                        reuse=fully_connected_reuse))
-
-            local_reuse = True
-
-            attention_scores_stacked = tf.stack(attention_scores, axis=1)
-            attention_values = tf.nn.softmax(attention_scores_stacked, dim=1)
-            return attention_values
-
-    def read_attention_network(self, network_type, state, network_reuse, window):
-
-        if network_type == "source_read":
-            attention_network_input = source_sentences_projected
-        elif network_type == "target_read":
-            attention_network_input = target_sentences_projected
-        # elif network_type == "context":
-        #    attention_network_input = sentence_contexts
-        else:
-            ######## Add error message
-            return
-
-        attention_values = self.get_attention_scores(attention_network_input, state, network_reuse, window,
-                                                     network_type)
-
-        attention_values_split = tf.split(attention_values, num_or_size_splits=window, axis=-1)
-
-        attention_weighted_inputs = []
-        for attention_values_i in attention_values_split:
-            attention_weighted_inputs.append(tf.reduce_sum(tf.multiply(attention_network_input, attention_values_i), 1))
-
-        return tf.stack(attention_weighted_inputs, axis=1)
-
-    def write_attention_network(self, network_type, state, network_reuse, window):
-
-        if network_type == "target_write":
-            attention_network_input = target_sentences_projected
-        # elif network_type == "context":
-        #    attention_network_input = sentence_contexts
-        else:
-            ######## Add error message
-            return
-
-        attention_values = self.get_attention_scores(attention_network_input, state, network_reuse, window,
-                                                     network_type)
-
-        attention_values_split = tf.split(attention_values, num_or_size_splits=window, axis=-1)
-
-        state_stacked = tf.stack([state] * max_sequence_length, axis=1)
-
-        attention_weighted_inputs = []
-        for attention_values_i in attention_values_split:
-            if network_type == "target_write":
-                target_sentences_projected = tf.multiply(attention_network_input,
-                                                              1 - attention_values_i) + tf.multiply(state_stacked,
-                                                                                                    attention_values_i)
-
     def encode(self, inputs, sequence_length, **kwargs):
         scope = tf.get_variable_scope()
         scope.set_initializer(tf.random_uniform_initializer(
             -self.params["init_scale"],
             self.params["init_scale"]))
 
-        cell = training_utils.get_rnn_cell(**self.params["rnn_cell"])
+        cell = AttentionRNNCell(self.params["rnn_cell"])
 
         state = cell.zero_state(batch_size, tf.float32)
         outputs = []
