@@ -232,34 +232,21 @@ class DynamicDirectionalRNNEncoder(Encoder):
             self.params["init_scale"]))
 
         cell = AttentionRNNCell(self.params["rnn_cell"])
+        batch_size = inputs.get_shape().as_list()[0]
+        initial_state = cell.zero_state(batch_size, tf.float32)  # TODO: Make dtype configurable?
 
-        state = cell.zero_state(batch_size, tf.float32)
-        outputs = []
+        initial_state[1] = inputs
 
-        dynamic_rnn_reuse = False
-        for step in range(steps):
-            attention_weighted_source = self.read_attention_network('source_read', state, dynamic_rnn_reuse,
-                                                                    window)
-            attention_weighted_target = self.read_attention_network('target_read', state, dynamic_rnn_reuse,
-                                                                    window)  ##### state or output???
-            # attention_weighted_context = self.create_attention_network('context', state, unified_rnn_reuse,
-            #                                                            window)
-
-            cell_input = tf.concat(
-                [attention_weighted_source, attention_weighted_target
-                 # , attention_weighted_context
-                 ], 1)
-
-            output, state = cell(cell_input, state)
-            self.write_attention_network('target_write', output, unified_rnn_reuse, window)
-            unified_rnn_reuse = True
-
-
-        # Concatenate outputs and states of the forward and backward RNNs
-        outputs_concat = tf.concat(outputs, 2)
+        outputs, state = tf.nn.dynamic_rnn(
+            cell=cell,
+            inputs=tf.zeros([batch_size, cell.max_sequence_length], tf.int32),
+            initial_state=initial_state,
+            sequence_length=[x * 2 for x in sequence_length],  #################
+            dtype=tf.float32,
+            **kwargs)
 
         return EncoderOutput(
-            outputs=outputs_concat,
-            final_state=states,
-            attention_values=outputs_concat,
-            attention_values_length=sequence_length)
+            outputs=outputs,
+            final_state=state,
+            attention_values=state[2],
+            attention_values_length=[cell.max_sequence_length] * batch_size)

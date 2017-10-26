@@ -149,7 +149,7 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
 
     def get_attention_scores(self, attention_network_input, state, window, network_type, positional_embeddings):
 
-        ########## Add residual connections
+        # TODO: Add residual connections
 
         attention_network_input_split = tf.split(attention_network_input, num_or_size_splits=self.max_sequence_length,
                                                  axis=1)
@@ -244,12 +244,12 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
           - New state: Either a single `2-D` tensor, or a tuple of tensors matching
             the arity and shapes of `state`.
         """
-        if (isinstance(state, list) or len(state) != 3):
+        if isinstance(state, list) or len(state) != 3:
             raise TypeError("state is not a list of length 3")
 
         with tf.variable_scope(scope) as var_scope:
 
-            if (self.network_reuse):
+            if self.network_reuse:
                 var_scope.reuse_variables()
 
             positional_embeddings = tf.get_variable("positional_embeddings",
@@ -258,17 +258,18 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
 
             attention_weighted_source = self.read_attention_network('source_read', state[1], state[0], self.read_window,
                                                                     positional_embeddings)
-            attention_weighted_target = self.read_attention_network('target_read', state[2], state[0], self.read_window,
-                                                                    positional_embeddings)
+            attention_weighted_context = self.read_attention_network('context_read', state[2], state[0],
+                                                                     self.read_window,
+                                                                     positional_embeddings)
 
             cell_input = tf.concat(
-                [attention_weighted_source, attention_weighted_target
+                [attention_weighted_source, attention_weighted_context
                  # , attention_weighted_context
                  ], 1)
 
             output, state[0] = self.cell(cell_input, state[0])
 
-            state[2] = self.write_attention_network('target_write', state[2], output,  ############### output or state?
+            state[2] = self.write_attention_network('context_write', state[2], output,  # TODO: output or state?
                                                     self.write_window, positional_embeddings)
 
             self.network_reuse = True
@@ -282,28 +283,9 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
         It can be represented by an Integer, a TensorShape or a tuple of Integers
         or TensorShapes.
         """
-        return (self.num_units, self.num_units * self.embedding_size, self.num_units * self.embedding_size)
+        return self.num_units, self.max_sequence_length * self.embedding_size, self.max_sequence_length * self.embedding_size
 
     @property
     def output_size(self):
         """Integer or TensorShape: size of outputs produced by this cell."""
-        raise NotImplementedError("Abstract method")
-
-    def zero_state(self, batch_size, dtype):
-        """Return zero-filled state tensor(s).
-
-        Args:
-          batch_size: int, float, or unit Tensor representing the batch size.
-          dtype: the data type to use for the state.
-
-        Returns:
-          If `state_size` is an int or TensorShape, then the return value is a
-          `N-D` tensor of shape `[batch_size x state_size]` filled with zeros.
-
-          If `state_size` is a nested list or tuple, then the return value is
-          a nested list or tuple (of the same structure) of `2-D` tensors with
-          the shapes `[batch_size x s]` for each s in `state_size`.
-        """
-        with ops.name_scope(type(self).__name__ + "ZeroState", values=[batch_size]):
-            state_size = self.state_size
-            return _zero_state_tensors(state_size, batch_size, dtype)
+        return self.cell.output_size
