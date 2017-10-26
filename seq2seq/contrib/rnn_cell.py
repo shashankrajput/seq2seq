@@ -147,7 +147,7 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
     for each `s` in `self.batch_size`.
     """
 
-    def get_attention_scores(self, attention_network_input, state, window, network_type):
+    def get_attention_scores(self, attention_network_input, state, window, network_type, positional_embeddings):
 
         ########## Add residual connections
 
@@ -157,11 +157,16 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
 
         local_reuse = False
 
-        for attention_network_input_i in attention_network_input_split:
+        for word_index, attention_network_input_i in enumerate(attention_network_input_split):
+            embedding_lookup_indices = tf.multiply(tf.ones([self.batch_size], dtype=tf.int32, name='current_position'),
+                                                   word_index)
+
+            positional_embedding = tf.nn.embedding_lookup(positional_embeddings, embedding_lookup_indices)
+
             fully_connected_reuse = local_reuse or self.network_reuse
 
             attention_scores.append(
-                tf.contrib.layers.stack(tf.concat([attention_network_input_i, state], 1),
+                tf.contrib.layers.stack(tf.concat([attention_network_input_i, positional_embedding, state], 1),
                                         tf.contrib.layers.fully_connected,
                                         [
                                             self.attention_num_units] * self.attention_num_layers + [
@@ -175,10 +180,10 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
             attention_values = tf.nn.softmax(attention_scores_stacked, dim=1)
             return attention_values
 
-    def read_attention_network(self, network_type, attention_network_input, state, window):
+    def read_attention_network(self, network_type, attention_network_input, state, window, positional_embeddings):
 
         attention_values = self.get_attention_scores(attention_network_input, state, window,
-                                                     network_type)
+                                                     network_type, positional_embeddings)
 
         attention_values_split = tf.split(attention_values, num_or_size_splits=window, axis=-1)
 
@@ -188,27 +193,29 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
 
         return tf.stack(attention_weighted_inputs, axis=1)
 
-    def write_attention_network(self, network_type, attention_network_input, state, window):
+    def write_attention_network(self, network_type, attention_network_input, state, window, positional_embeddings):
 
         attention_values = self.get_attention_scores(attention_network_input, state, window,
-                                                     network_type)
+                                                     network_type, positional_embeddings)
 
         attention_values_split = tf.split(attention_values, num_or_size_splits=window, axis=-1)
 
-        state_stacked = tf.stack([state] * self.max_input_length, axis=1)
+        state_stacked = tf.stack([state] * self.max_sequence_length, axis=1)
 
-        attention_weighted_inputs = []
+        attention_weighted_outputs = []
         for attention_values_i in attention_values_split:
-            if network_type == "target_write":
-                target_sentences_projected = tf.multiply(attention_network_input,
-                                                         1 - attention_values_i) + tf.multiply(state_stacked,
-                                                                                               attention_values_i)
+            attention_weighted_outputs.append(tf.multiply(attention_network_input,
+                                                          1 - attention_values_i) + tf.multiply(state_stacked,
+                                                                                                attention_values_i))
+
+        return tf.reduce_mean(tf.stack(attention_weighted_outputs, axis=1))
 
     def __init__(self, cell_params):
 
         super(AttentionRNNCell, self).__init__(_reuse=cell_params['reuse'])
         self.cell = training_utils.get_rnn_cell(**cell_params)
-        self.max_input_length = cell_params["max_input_length"]  # TODO: Different length for context vector?
+        self.max_sequence_length = cell_params[
+            "max_sequence_length"]  # TODO: Different length for input and context vectors?
         self.positional_embedding_size = cell_params["positional_embedding_size"]
         self.attention_num_layers = cell_params["attention_num_layers"]
         self.attention_num_units = cell_params["attention_num_units"]
@@ -216,21 +223,8 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
         self.network_reuse = False
         self.read_window = cell_params["read_window"]
         self.write_window = cell_params["write_window"]
-
-        self.positional_embeddings = tf.get_variable("positional_embeddings",
-                                                     [self.max_input_length, self.positional_embedding_size],
-                                                     dtype=tf.float32)  # TODO: Make dtype configurable
-
-        Implement
-        this: embedding_lookup_indices = tf.multiply(tf.ones([batch_size], dtype=tf.int32, name='current_position'),
-                                                     word_index)
-
-        Implement
-        this: positional_embedding = tf.nn.embedding_lookup(self.positional_embeddings, embedding_lookup_indices)
-
-        Make
-        initial
-        state
+        self.num_units = cell_params("num_units")
+        self.embedding_size = cell_params("num_units")  # TODO: Different size for words and context
 
     def call(self, inputs, state, scope=None):
         """Run this RNN cell on inputs, starting from the given state.
@@ -253,22 +247,33 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
         if (isinstance(state, list) or len(state) != 3):
             raise TypeError("state is not a list of length 3")
 
-        attention_weighted_source = self.read_attention_network('source_read', state[1], state[0], self.read_window)
-        attention_weighted_target = self.read_attention_network('target_read', state[2], state[0], self.read_window)
+        with tf.variable_scope(scope) as var_scope:
 
-        cell_input = tf.concat(
-            [attention_weighted_source, attention_weighted_target
-             # , attention_weighted_context
-             ], 1)
+            if (self.network_reuse):
+                var_scope.reuse_variables()
 
-        output, state[0] = self.cell(cell_input, state[0])
+            positional_embeddings = tf.get_variable("positional_embeddings",
+                                                    [self.max_sequence_length, self.positional_embedding_size],
+                                                    dtype=tf.float32)  # TODO: Make dtype configurable
 
-        self.write_attention_network('target_write', state[2], state[0], ###############333
-                                     self.write_window)  # Will call by reference work?????????????????????
+            attention_weighted_source = self.read_attention_network('source_read', state[1], state[0], self.read_window,
+                                                                    positional_embeddings)
+            attention_weighted_target = self.read_attention_network('target_read', state[2], state[0], self.read_window,
+                                                                    positional_embeddings)
 
-        self.network_reuse = True
+            cell_input = tf.concat(
+                [attention_weighted_source, attention_weighted_target
+                 # , attention_weighted_context
+                 ], 1)
 
-        return output, state
+            output, state[0] = self.cell(cell_input, state[0])
+
+            state[2] = self.write_attention_network('target_write', state[2], output,  ############### output or state?
+                                                    self.write_window, positional_embeddings)
+
+            self.network_reuse = True
+
+            return output, state
 
     @property
     def state_size(self):
@@ -277,7 +282,7 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
         It can be represented by an Integer, a TensorShape or a tuple of Integers
         or TensorShapes.
         """
-        return sdsdsds
+        return (self.num_units, self.num_units * self.embedding_size, self.num_units * self.embedding_size)
 
     @property
     def output_size(self):
