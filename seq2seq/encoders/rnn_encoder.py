@@ -239,9 +239,9 @@ class DynamicDirectionalRNNEncoder(Encoder):
 
         outputs, state = tf.nn.dynamic_rnn(
             cell=cell,
-            inputs=tf.zeros([batch_size, cell.max_sequence_length], tf.int32),
+            inputs=tf.zeros([batch_size, cell.max_sequence_length * 2], tf.int32),
             initial_state=initial_state,
-            sequence_length=[x * 2 for x in sequence_length],  #################
+            sequence_length=[x * 2 for x in sequence_length],
             dtype=tf.float32,
             **kwargs)
 
