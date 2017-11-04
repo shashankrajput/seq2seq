@@ -226,6 +226,10 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
         self.num_units = cell_params("num_units")
         self.embedding_size = cell_params("num_units")  # TODO: Different size for words and context
 
+        self.positional_embeddings = tf.get_variable("positional_embeddings",
+                                                [self.max_sequence_length, self.positional_embedding_size],
+                                                dtype=tf.float32)  # TODO: Make dtype configurable
+
     def call(self, inputs, state, scope=None):
         """Run this RNN cell on inputs, starting from the given state.
 
@@ -249,18 +253,11 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
 
         with tf.variable_scope(scope) as var_scope:
 
-            if self.network_reuse:
-                var_scope.reuse_variables()
-
-            positional_embeddings = tf.get_variable("positional_embeddings",
-                                                    [self.max_sequence_length, self.positional_embedding_size],
-                                                    dtype=tf.float32)  # TODO: Make dtype configurable
-
             attention_weighted_source = self.read_attention_network('source_read', state[1], state[0], self.read_window,
-                                                                    positional_embeddings)
+                                                                    self.positional_embeddings)
             attention_weighted_context = self.read_attention_network('context_read', state[2], state[0],
                                                                      self.read_window,
-                                                                     positional_embeddings)
+                                                                     self.positional_embeddings)
 
             cell_input = tf.concat(
                 [attention_weighted_source, attention_weighted_context
@@ -270,11 +267,10 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
             output, state[0] = self.cell(cell_input, state[0])
 
             state[2] = self.write_attention_network('context_write', state[2], output,  # TODO: output or state?
-                                                    self.write_window, positional_embeddings)
+                                                    self.write_window, self.positional_embeddings)
 
             self.network_reuse = True
-
-            return output, state
+        return output, state
 
     @property
     def state_size(self):
