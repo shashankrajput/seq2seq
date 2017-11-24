@@ -155,7 +155,9 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
 
         state_tiled = tf.tile(state_expanded, [1, tf.shape(attention_network_input)[1], 1])
 
-        attention_scores = tf.contrib.layers.stack(tf.concat([attention_network_input, state_tiled], 2),
+        input_concated = tf.concat([attention_network_input, state_tiled], 2)
+
+        attention_scores = tf.contrib.layers.stack(input_concated,
                                                    tf.contrib.layers.fully_connected,
                                                    [
                                                        self.attention_num_units] * self.attention_num_layers + [
@@ -163,9 +165,10 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
                                                        1
                                                    ],
                                                    activation_fn=tf.nn.relu, scope=network_type,
-                                                   reuse=self.network_reuse)
+                                                   reuse=False)
 
         attention_values = tf.nn.softmax(attention_scores, dim=1)
+
         return attention_values
 
     def read_attention_network(self, network_type, attention_network_input, state,
@@ -197,22 +200,21 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
 
         # TODO TODO TODO: Don't change the positional embedding part of outputs
 
-        return tf.multiply(output_with_original_positional_embeddings, attention_values) + tf.multiply(
-            attention_network_input, 1 - attention_values)
+        weighted_new = tf.multiply(output_with_original_positional_embeddings, attention_values)
+        weighted_original = tf.multiply(attention_network_input, 1 - attention_values)
 
+        return weighted_new + weighted_original
 
-    def __init__(self, inner_cell, cell_params, rnn_param_list):
+    def __init__(self, inner_cell, embedding_size, positional_embedding_size, attention_num_layers,
+                 attention_num_units):
         super(AttentionRNNCell, self).__init__()  # reuse? refer to original code for clarity
-        [embedding_size, positional_embedding_size, attention_num_layers, attention_num_units] = rnn_param_list
         self.cell = inner_cell
         self.attention_num_layers = attention_num_layers
         self.attention_num_units = attention_num_units
         # TODO : Make attention function for attention layer configurable
-        self.network_reuse = False
         # Todo : Multiple read and writes? read write window?
         self.embedding_size = embedding_size
         self.positional_embedding_size = positional_embedding_size
-
 
     def call(self, inputs, state, scope=None):
         """Run this RNN cell on inputs, starting from the given state.
@@ -239,6 +241,7 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
             attention_weighted_source = self.read_attention_network('source_read', state[1], state[0]
                                                                     # , self.read_window,
                                                                     )
+
             attention_weighted_context = self.read_attention_network('context_read', state[2], state[0]
                                                                      # ,self.read_window
                                                                      )
@@ -248,7 +251,6 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
                  # , attention_weighted_context
                  ], 1)
 
-
             output, state_0 = self.cell(cell_input, state[0])
 
             state_2 = self.write_attention_network('context_write', state[2], state_0, output,
@@ -256,11 +258,7 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
                                                    # self.write_window,
                                                    )
 
-            # state_2 = tf.Print(state_2, [tf.shape(state_2)], message="$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
-
-            self.network_reuse = True
         return output, (state_0, state[1], state_2)
-
 
     @property
     def state_size(self):
@@ -272,7 +270,6 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
         return self.cell.state_size, tf.TensorShape(
             [None, self.embedding_size + self.positional_embedding_size]), tf.TensorShape(
             [None, self.embedding_size + self.positional_embedding_size])
-
 
     @property
     def output_size(self):

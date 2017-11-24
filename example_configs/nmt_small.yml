@@ -7,15 +7,14 @@ model_params:
   embedding.dim: 128
   encoder.class: seq2seq.encoders.DynamicDirectionalRNNEncoder
   encoder.params:
-    attention_num_layers: 3
+    attention_num_layers: 2
     attention_num_units: 32
     source_max_seq_len: 50
     positional_embedding_size: 32
-    embedding_size: 128
     rnn_cell:
       cell_class: GRUCell
       cell_params:
-        num_units: 160 # 128 + 32
+        num_units: -1
       dropout_input_keep_prob: 0.8
       dropout_output_keep_prob: 1.0
       num_layers: 1

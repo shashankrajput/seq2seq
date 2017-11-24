@@ -220,7 +220,6 @@ class DynamicDirectionalRNNEncoder(Encoder):
         self.max_sequence_length = self.params[
             "source_max_seq_len"]  # TODO: Different length for input and context vectors?
         self.positional_embedding_size = self.params["positional_embedding_size"]
-        self.embedding_size = self.params["embedding_size"]  # TODO: Different size for words and context
         self.attention_num_layers = self.params["attention_num_layers"]
         self.attention_num_units = self.params["attention_num_units"]
 
@@ -230,7 +229,6 @@ class DynamicDirectionalRNNEncoder(Encoder):
             "rnn_cell": _default_rnn_cell_params(),
             "source_max_seq_len": 50,
             "positional_embedding_size": 32,
-            "embedding_size": 128,
             "attention_num_layers": 3,
             "attention_num_units": 32,
             "init_scale": 0.04,
@@ -242,23 +240,24 @@ class DynamicDirectionalRNNEncoder(Encoder):
             -self.params["init_scale"],
             self.params["init_scale"]))
 
-        inner_cell = training_utils.get_rnn_cell(**self.params["rnn_cell"])
-        rnn_param_list = [self.embedding_size,
-                          self.positional_embedding_size,
-                          self.attention_num_layers,
-                          self.attention_num_units]
-        cell = AttentionRNNCell(inner_cell=inner_cell, cell_params=self.params["rnn_cell"],
-                                rnn_param_list=rnn_param_list)
-        batch_size = tf.shape(inputs)[0]
-        # initial_state = cell.zero_state(batch_size, tf.float32)  # TODO: Make dtype configurable?
+        embedding_size = inputs.get_shape().as_list()[-1]  # TODO: Different size for words and context
 
-        positional_embeddings = tf.get_variable("positional_embeddings",
-                                                [self.max_sequence_length, self.positional_embedding_size],
-                                                dtype=tf.float32)  # TODO: Make dtype configurable
+        self.params["rnn_cell"]["cell_params"]["num_units"] = embedding_size + self.positional_embedding_size
+
+        inner_cell = training_utils.get_rnn_cell(**self.params["rnn_cell"])
+        cell = AttentionRNNCell(inner_cell,
+                                embedding_size,
+                                self.positional_embedding_size,
+                                self.attention_num_layers,
+                                self.attention_num_units)
+
+        positional_embeddings_var = tf.get_variable("positional_embeddings",
+                                                    [self.max_sequence_length, self.positional_embedding_size],
+                                                    dtype=tf.float32)  # TODO: Make dtype configurable
 
         position_sequence = tf.range(tf.shape(inputs)[1])
 
-        positional_embeddings = tf.nn.embedding_lookup(positional_embeddings, position_sequence)
+        positional_embeddings = tf.nn.embedding_lookup(positional_embeddings_var, position_sequence)
 
         positional_embeddings = tf.expand_dims(positional_embeddings, axis=0)
 
@@ -268,26 +267,21 @@ class DynamicDirectionalRNNEncoder(Encoder):
 
         initial_state_1 = tf.concat([inputs, positional_embeddings_for_batch], axis=2)
 
-        initial_state_2 = tf.concat([tf.zeros_like(inputs), positional_embeddings_for_batch], axis=2)
+        initial_state_2 = tf.concat([inputs, positional_embeddings_for_batch], axis=2)
 
         initial_state = (initial_state_0, initial_state_1, initial_state_2)
 
         outputs, state = tf.nn.dynamic_rnn(
             cell=cell,
-            inputs=tf.zeros([tf.shape(inputs)[0], tf.shape(inputs)[1] * 2, 1], tf.float32),
+            inputs=tf.zeros([tf.shape(inputs)[0], tf.shape(inputs)[1] * 1, 1], tf.float32),
+            # Todo : Make this * 1 configurable
             initial_state=initial_state,
-            sequence_length=sequence_length * 2,  # Todo : Make this 2 configurable
+            sequence_length=sequence_length * 1,  # Todo : Make this 1 configurable
             dtype=tf.float32,
             **kwargs)
-
-        # state_0 = state[0]
-        # state_2 = state[2]
-        # outputs = tf.Print(outputs, [tf.shape(outputs)], message="##1#############################################")
-        # state_0 = tf.Print(state_0, [tf.shape(state_0)], message="###2############################################")
-        # state_2 = tf.Print(state_2, [tf.shape(state_2)], message="####3###########################################")
 
         return EncoderOutput(
             outputs=state[2],
             final_state=state[0],
             attention_values=state[2],
-            attention_values_length=sequence_length * 2)
+            attention_values_length=tf.ones([tf.shape(inputs)[0]], dtype=tf.int32) * tf.shape(inputs)[1])
