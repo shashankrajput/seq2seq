@@ -22,15 +22,15 @@ export DEV_SOURCES=${HOME}/nmt_data/toy_reverse/dev/sources.txt
 export DEV_TARGETS=${HOME}/nmt_data/toy_reverse/dev/targets.txt
 
 export DEV_TARGETS_REF=${HOME}/nmt_data/toy_reverse/dev/targets.txt
-export TRAIN_STEPS=10000
+export TRAIN_STEPS=1000
 
-export MODEL_DIR=${HOME}/Workspace/checkpoints/nmt_models/nmt_dynamic_encoder
+export MODEL_DIR=${HOME}/Workspace/checkpoints/nmt_models/nmt_baseline
 mkdir -p $MODEL_DIR
 
 
 python -m bin.train \
   --config_paths="
-      ./example_configs/nmt_small.yml,
+      ./example_configs/nmt_small_baseline.yml,
       ./example_configs/train_seq2seq.yml,
       ./example_configs/text_metrics_bpe.yml" \
   --model_params "

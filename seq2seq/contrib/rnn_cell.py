@@ -169,6 +169,9 @@ class AttentionRNNCell(tf.contrib.rnn.RNNCell):
 
         attention_values = tf.nn.softmax(attention_scores, dim=1)
 
+        attention_values = tf.Print(attention_values, [attention_values[0]], message="##########attention_values:",
+                                  summarize=100)
+
         return attention_values
 
     def read_attention_network(self, network_type, attention_network_input, state,
